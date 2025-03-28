@@ -1,83 +1,50 @@
-import random
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Dec 19 08:52:47 2020
 
-import cv2
+@author: NIKITA
+"""
+
+from __future__ import division
+from __future__ import print_function
+
+import random
 import numpy as np
+import cv2
 
 
 def preprocess(img, imgSize, dataAugmentation=False):
-    "put img into target img of size imgSize, transpose for TF and normalize gray-values"
+	#"put img into target img of size imgSize, transpose for TF and normalize gray-values"
 
-    # there are damaged files in IAM dataset - just use black image instead
-    if img is None:
-        img = np.zeros(imgSize[::-1])
+	# there are damaged files in IAM dataset - just use black image instead 
+	if img is None:
+		img = np.zeros([imgSize[1], imgSize[0]])
 
-    # data augmentation
-    img = img.astype(np.float)
-    if dataAugmentation:
-        # photometric data augmentation
-        if random.random() < 0.25:
-            rand_odd = lambda: random.randint(1, 3) * 2 + 1
-            img = cv2.GaussianBlur(img, (rand_odd(), rand_odd()), 0)
-        if random.random() < 0.25:
-            img = cv2.dilate(img, np.ones((3, 3)))
-        if random.random() < 0.25:
-            img = cv2.erode(img, np.ones((3, 3)))
-        if random.random() < 0.5:
-            img = img * (0.25 + random.random() * 0.75)
-        if random.random() < 0.25:
-            img = np.clip(img + (np.random.random(img.shape) - 0.5) * random.randint(1, 50), 0, 255)
-        if random.random() < 0.1:
-            img = 255 - img
+	# increase dataset size by applying random stretches to the images
+	if dataAugmentation:
+		stretch = (random.random() - 0.5) # -0.5 .. +0.5
+		wStretched = max(int(img.shape[1] * (1 + stretch)), 1) # random width, but at least 1
+		img = cv2.resize(img, (wStretched, img.shape[0])) # stretch horizontally by factor 0.5 .. 1.5
+	
+	# create target image and copy sample image into it
+	(wt, ht) = imgSize
+	(h, w) = img.shape
+	fx = w / wt
+	fy = h / ht
+	f = max(fx, fy)
+	newSize = (max(min(wt, int(w / f)), 1), max(min(ht, int(h / f)), 1)) # scale according to f (result at least 1 and at most wt or ht)
+	img = cv2.resize(img, newSize)
+	target = np.ones([ht, wt]) * 255
+	target[0:newSize[1], 0:newSize[0]] = img
 
-        # geometric data augmentation
-        wt, ht = imgSize
-        h, w = img.shape
-        f = min(wt / w, ht / h)
-        fx = f * np.random.uniform(0.75, 1.25)
-        fy = f * np.random.uniform(0.75, 1.25)
+	# transpose for TF , rotate 90 degree counter clockwise
+	img = cv2.transpose(target)
 
-        # random position around center
-        txc = (wt - w * fx) / 2
-        tyc = (ht - h * fy) / 2
-        freedom_x = max((wt - fx * w) / 2, 0) + wt / 10
-        freedom_y = max((ht - fy * h) / 2, 0) + ht / 10
-        tx = txc + np.random.uniform(-freedom_x, freedom_x)
-        ty = tyc + np.random.uniform(-freedom_y, freedom_y)
+	# normalize i.e to calculate threshold
+	(m, s) = cv2.meanStdDev(img)
+	m = m[0][0]
+	s = s[0][0]
+	img = img - m
+	img = img / s if s>0 else img
+	return img
 
-        # map image into target image
-        M = np.float32([[fx, 0, tx], [0, fy, ty]])
-        target = np.ones(imgSize[::-1]) * 255 / 2
-        img = cv2.warpAffine(img, M, dsize=imgSize, dst=target, borderMode=cv2.BORDER_TRANSPARENT)
-
-    # no data augmentation
-    else:
-        # center image
-        wt, ht = imgSize
-        h, w = img.shape
-        f = min(wt / w, ht / h)
-        tx = (wt - w * f) / 2
-        ty = (ht - h * f) / 2
-
-        # map image into target image
-        M = np.float32([[f, 0, tx], [0, f, ty]])
-        target = np.ones(imgSize[::-1]) * 255 / 2
-        img = cv2.warpAffine(img, M, dsize=imgSize, dst=target, borderMode=cv2.BORDER_TRANSPARENT)
-
-    # transpose for TF
-    img = cv2.transpose(img)
-
-    # convert to range [-1, 1]
-    img = img / 255 - 0.5
-    return img
-
-
-if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-
-    img = cv2.imread('../data/test.png', cv2.IMREAD_GRAYSCALE)
-    img_aug = preprocess(img, (128, 32), True)
-    plt.subplot(121)
-    plt.imshow(img, cmap='gray')
-    plt.subplot(122)
-    plt.imshow(cv2.transpose(img_aug), cmap='gray')
-    plt.show()
